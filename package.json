@@ -1,0 +1,13 @@
+{
+  "name": "little-label-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080 --bind 127.0.0.1",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {"niimbot-web-bluetooth": "2.6.0", "qrcode-generator": "2.0.4"},
+  "devDependencies": {"@napi-rs/canvas": "0.1.80", "jsdom": "26.1.0", "jsqr": "1.4.0"}
+}

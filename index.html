@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#294e43">
+  <meta name="description" content="Make QR, text, and line art labels. Print directly to a Niimbot printer over Bluetooth.">
+  <title>Little Label Studio</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./vendor/niimbot/niimbot.js"></script>
+  <script defer src="./vendor/niimbot/label-size.js"></script>
+  <script defer src="./vendor/niimbot/label-memory.js"></script>
+  <script defer src="./vendor/qrcode/qrcode.js"></script>
+  <script defer src="./vendor/qrcode/qrcode_UTF8.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-icon" aria-hidden="true">▥</span><span>little label <b>studio</b><small>A small space for useful things.</small></span></a>
+    <div class="connection"><span id="connection-state" class="pill">○ Disconnected</span><button id="connect" class="primary">Connect printer <span aria-hidden="true">↗</span></button><button id="disconnect" hidden>Disconnect</button></div>
+  </header>
+  <main>
+    <div class="page-heading"><div><span class="eyebrow">YOUR DESK, A LITTLE MORE ORGANIZED</span><h1>Make it a label.</h1><p>Design here. Print right over Bluetooth.</p></div><span class="local-badge">● Everything stays in your browser</span></div>
+    <div id="compatibility" class="notice" hidden></div>
+    <div class="workspace">
+      <section class="card editor" aria-labelledby="editor-heading">
+        <div class="card-heading"><h2 id="editor-heading">01 <span>Design</span></h2><button id="reset" class="text-button">Start fresh</button></div>
+        <div class="tabs" role="tablist" aria-label="Label content">
+          <button role="tab" id="tab-qr" aria-controls="panel-qr" aria-selected="true" data-mode="qr">▦ &nbsp; QR code</button>
+          <button role="tab" id="tab-custom" aria-controls="panel-custom" aria-selected="false" data-mode="custom" tabindex="-1">▦ Custom QR</button>
+          <button role="tab" id="tab-text" aria-controls="panel-text" aria-selected="false" data-mode="text" tabindex="-1">Tt &nbsp; Text</button>
+          <button role="tab" id="tab-image" aria-controls="panel-image" aria-selected="false" data-mode="image" tabindex="-1">◇ &nbsp; Artwork</button>
+        </div>
+        <div class="editor-body">
+          <div id="panel-qr" role="tabpanel" aria-labelledby="tab-qr">
+            <label for="qr">Link or QR content</label><textarea id="qr" rows="3" maxlength="1800" spellcheck="false">https://example.com</textarea><p class="hint">A link, Wi-Fi string, inventory ID, or any short text.</p>
+
+          </div>
+          <div id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden><div class="soft-note">For jars, cables, storage bins, and everything in between. Text fits within the label.</div></div>
+          <div id="panel-image" role="tabpanel" aria-labelledby="tab-image" hidden>
+            <label class="upload" for="art-file"><span class="upload-icon">↥</span><strong>Bring your own artwork</strong><span>Choose PNG, JPEG, WebP, or SVG · up to 5 MB</span></label><input id="art-file" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+            <div class="art-actions"><span id="art-name" class="hint">Or sketch something below.</span><button id="clear-art" class="text-button">Clear art</button></div>
+            <div class="drawing-toolbar"><span>Drawing pad</span><label class="check"><input type="checkbox" id="eraser"> Eraser</label><button id="use-drawing" class="text-button">Use drawing</button></div>
+            <canvas id="drawing" width="600" height="360" aria-label="Freehand drawing pad; alternatively upload artwork" tabindex="0"></canvas>
+            <label for="image-scaling">Image scaling</label><select id="image-scaling"><option value="crisp">Crisp · QR codes & line art</option><option value="smooth">Smooth · photos & illustrations</option></select><p class="hint">Crisp keeps hard pixel edges without smoothing. The original QR pattern is printed as an image.</p>
+            <label for="threshold">Black / white threshold <output id="threshold-value">160</output></label><input id="threshold" type="range" min="1" max="254" value="160">
+          </div>
+          <div id="panel-custom" role="tabpanel" aria-labelledby="tab-custom" hidden>
+            <div class="soft-note"><strong>Original pattern preserved</strong><p id="custom-info">Import a grid from your QR tool. The modules stay fixed while you edit the label layout.</p></div>
+            <label for="grid-link">Custom QR transfer link</label><textarea id="grid-link" rows="2" placeholder="Paste a link containing #grid=…&data=…" spellcheck="false"></textarea>
+            <div class="art-actions"><button id="load-grid-link">Load QR link</button><button id="import-grid">Import grid JSON</button></div><input id="grid-file" type="file" accept="application/json,.json" hidden>
+          </div>
+          <div id="qr-layout-controls">            <label for="layout">Layout</label><select id="layout"><option value="side">QR beside text</option><option value="stack">QR above text</option><option value="only">QR only · largest code</option></select><button id="compact-qr" class="text-button">Use compact margins · 0.5 mm</button><p class="hint">QR codes keep a white scanning border. Choose QR only for the largest code.</p></div>
+          <div id="text-fields"><label for="title">Heading <span class="optional">optional</span></label><input id="title" value="A place for everything" maxlength="120"><label for="subtitle">Details <span class="optional">optional · one line per thought</span></label><textarea id="subtitle" rows="3" maxlength="500">And everything in its place.
+EST. 2026</textarea></div>
+          <div class="two-col"><div><label for="font-size">Text size (mm)</label><input id="font-size" type="number" min="1.5" max="15" step="0.5" value="3"></div><div><label for="margin">Margin (mm)</label><input id="margin" type="number" min="0.5" max="10" step="0.5" value="1"></div></div>
+          <div class="options"><label class="check"><input id="border" type="checkbox"> Thin border</label></div><label for="rotation">Artwork orientation</label><select id="rotation" aria-describedby="orientation-note"><option value="0">0° · Use as loaded</option><option value="90">90° clockwise · Use sideways</option><option value="180">180° · Use upside down</option><option value="270">90° counterclockwise · Use sideways</option></select><p id="orientation-note" class="hint"></p>
+        </div>
+      </section>
+      <div class="right-column">
+        <section class="card preview-card" aria-labelledby="preview-heading"><div class="card-heading"><h2 id="preview-heading">02 <span>Preview</span></h2><span class="pill subtle">1-bit · thermal ready</span></div><div class="preview-view"><label for="preview-view">View label</label><select id="preview-view"><option value="used">Upright · as used</option><option value="printer">As printed · across printer head</option></select></div><div class="preview-stage"><div id="width-ruler">50 mm</div><div id="label-paper"><canvas id="display-preview" aria-label="Monochrome label preview"></canvas></div><div class="preview-footnote"><span id="preview-dimensions">50 × 30 mm</span><span>PRINTABLE AREA SHOWN IN WHITE</span></div></div><div class="preview-bottom"><span id="geometry-info">Preview at 203 dpi</span><button id="download" class="text-button">↓ Save PNG</button></div><canvas id="preview" hidden aria-hidden="true"></canvas><p id="render-error" class="error" role="alert" hidden></p></section>
+        <section class="card" aria-labelledby="setup-heading"><div class="card-heading"><h2 id="setup-heading">03 <span>Paper & printer</span></h2><span class="tiny-tag">BLUETOOTH</span></div><div class="setup-body">
+          <label for="model">Printer model <span class="optional">identified on connection</span></label><select id="model"></select>
+          <div class="two-col"><div><label for="preset">Label size</label><select id="preset"><option value="50,30">50 × 30 mm · starter roll</option><option value="40,30">40 × 30 mm</option><option value="40,60">40 × 60 mm</option><option value="30,45">30 × 45 mm</option><option value="25,38">25 × 38 mm</option><option value="15,30">15 × 30 mm</option><option value="15,50">15 × 50 mm</option><option value="14,50">14 × 50 mm</option><option value="12,22">12 × 22 mm</option><option value="custom">Custom size</option></select></div><div><label for="density">Print density</label><select id="density"><option value="1">1 · Light</option><option value="2">2</option><option value="3" selected>3 · Standard</option><option value="4">4</option><option value="5">5 · Dark</option></select></div></div>
+          <div class="two-col"><div><label for="width">Width across head (mm)</label><input id="width" type="number" value="50" min="5" max="100" step="0.1"></div><div><label for="height">Length along feed (mm)</label><input id="height" type="number" value="30" min="5" max="200" step="0.1"></div></div>
+          <p id="size-note" class="hint"></p>
+          <div class="roll-box"><div><strong>Roll memory</strong><p id="roll-info">Connect to read the roll’s RFID tag.</p></div><div class="roll-actions"><button id="read-roll" disabled>Read tag</button><button id="remember-roll" disabled>Remember size</button></div></div>
+          <details><summary>Calibration & roll details</summary><label for="offset">Additional feed offset (mm)</label><input id="offset" type="number" value="0" min="-5" max="5" step="0.1"><p class="hint">Positive moves artwork down. Model-specific calibration is included automatically. Keep artwork away from edges.</p><pre id="status-details">No roll read yet.</pre></details>
+          <div class="print-row"><div><label for="copies">Copies</label><input id="copies" type="number" min="1" max="100" value="1"></div><button id="print" class="primary print-button" disabled>Print label <span aria-hidden="true">→</span></button></div><p id="message" class="message" role="status" aria-live="polite">Connect a printer when you’re ready. You can design and save a PNG anytime.</p>
+        </div></section>
+      </div>
+    </div>
+    <footer><span>Made for small, useful labels. <a href="https://github.com/iscarelli/niimbot-web-bluetooth" target="_blank" rel="noreferrer">Powered by niimbot-web-bluetooth</a> <span id="driver-version"></span></span><div><button id="export-design" class="text-button">Export design</button><button id="import-design" class="text-button">Import design</button><input id="design-file" type="file" accept="application/json,.json" hidden></div></footer>
+  </main>
+</body>
+</html>

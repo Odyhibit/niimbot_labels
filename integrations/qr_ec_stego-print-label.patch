@@ -1,0 +1,121 @@
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -247,10 +247,17 @@
+                             <div><span class="text-dark-muted">ECC capacity:</span> <span id="encode-ecc-cap"></span></div>
+                             <div class="text-xs text-dark-muted">Version table currently covers 1-10 for in-browser encoding.</div>
+                         </div>
+-                        <button onclick="downloadStego()" id="encode-download" disabled
+-                                class="w-full py-3 rounded-lg font-semibold bg-dark-elevated hover:bg-dark-border disabled:opacity-50 disabled:cursor-not-allowed transition">
+-                            Download PNG
+-                        </button>
++                        <div class="grid gap-3" style="grid-template-columns: 3fr 2fr;">
++                            <button type="button" onclick="downloadStego()" id="encode-download" disabled
++                                    class="min-w-0 py-3 rounded-lg font-semibold bg-dark-elevated hover:bg-dark-border disabled:opacity-50 disabled:cursor-not-allowed transition">
++                                Download PNG
++                            </button>
++                            <button type="button" onclick="printStegoLabel()" id="encode-print" disabled
++                                    title="Open the label editor in a new tab"
++                                    class="min-w-0 py-3 px-2 rounded-lg text-sm font-medium text-dark-muted border border-dark-border hover:text-dark-text hover:bg-dark-elevated disabled:opacity-50 disabled:cursor-not-allowed transition">
++                                Print label ↗
++                            </button>
++                        </div>
+                     </div>
+                 </div>
+             </div>
+@@ -429,6 +436,7 @@
+     <script src="js/qr-parser.js"></script>
+     <script src="js/stego.js"></script>
+     <script src="js/camera-scan.js"></script>
++    <script src="js/label-transfer.js"></script>
+     <script src="js/app.js"></script>
+ </body>
+ </html>
+--- a/docs/js/app.js
++++ b/docs/js/app.js
+@@ -3,6 +3,9 @@
+ let compareImages = { img1: null, img2: null };
+ let decodeImageData = null;
+ let encodeResult = null;
++// Set this to the deployed Little Label Studio URL.
++const LABEL_PRINTER_URL = 'https://odyhibit.github.io/niimbot_labels/';
++
+ let stegoMode = 'padding'; // 'padding' | 'ecc'
+ 
+ // ── Notification system ──────────────────────────────────────────────────────
+@@ -214,6 +217,11 @@
+ 
+ // Generate stego QR in-browser using GJ-based ECC payload approach
+ async function generateStego() {
++    encodeResult = null;
++    document.getElementById('encode-download').disabled = true;
++    document.getElementById('encode-print').disabled = true;
++    document.getElementById('encode-preview').classList.add('hidden');
++    document.getElementById('encode-meta').classList.add('hidden');
+     const decoy = document.getElementById('encode-decoy').value || '';
+     const secret = document.getElementById('encode-secret').value || '';
+     // Padding and ECC secrets are mutually exclusive, so one field feeds whichever is active.
+@@ -249,6 +257,7 @@
+         document.getElementById('encode-meta-version').innerText = encodeResult.version;
+         document.getElementById('encode-meta-mask').innerText = encodeResult.mask;
+         document.getElementById('encode-download').disabled = false;
++        document.getElementById('encode-print').disabled = false;
+         showNotification('Stego QR generated. Scan shows the decoy message.', 'success');
+     } catch (error) {
+         if (error.message && error.message.includes('version <=10')) {
+@@ -266,6 +275,19 @@
+     link.href = encodeResult.dataUrl;
+     link.download = 'qr_stego.png';
+     link.click();
++}
++
++// Send the original module grid without decoding or regenerating the QR.
++function printStegoLabel() {
++    if (!encodeResult?.modules) return;
++    try {
++        const url = LabelTransfer.createLabelGridUrl(
++            LABEL_PRINTER_URL, encodeResult.modules, 'Stego QR',
++        );
++        window.open(url, '_blank', 'noopener');
++    } catch (error) {
++        showNotification(`Could not open the label editor: ${error.message}`, 'error');
++    }
+ }
+ 
+ // Decode QR code and extract secrets
+--- a/docs/js/stego.js
++++ b/docs/js/stego.js
+@@ -584,6 +584,7 @@
+ 
+         return {
+             canvas,
++            modules: qr.modules.map(row => row.slice()),
+             dataUrl: canvas.toDataURL('image/png'),
+             padCapacity: dataBuild.padBytesCapacity,
+             eccCapacity: eccCap,
+--- /dev/null
++++ b/docs/js/label-transfer.js
+@@ -0,0 +1,24 @@
++// Compact QR transfer to Little Label Studio. Keep in sync with its image-transfer.js.
++(function (root) {
++function packQrGrid(modules) {
++  const size = modules?.length;
++  if (!Number.isInteger(size) || size < 21 || size > 177 || (size - 21) % 4) throw new Error('Unsupported QR grid width.');
++  const bytes = new Uint8Array(Math.ceil(size * size / 8));
++  modules.forEach((row, y) => {
++    if (!Array.isArray(row) || row.length !== size) throw new Error('QR grid must be square.');
++    row.forEach((dark, x) => {
++      if (![true, false, 0, 1].includes(dark)) throw new Error('QR modules must be booleans or 0/1.');
++      if (dark) { const i = y * size + x; bytes[i >> 3] |= 1 << (7 - i % 8); }
++    });
++  });
++  return { size, data: btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '') };
++}
++function createLabelGridUrl(printerUrl, modules, name = 'Custom QR') {
++  const grid = packQrGrid(modules), url = new URL(printerUrl);
++  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS label app URL.');
++  url.hash = new URLSearchParams({ grid: String(grid.size), data: grid.data, name: String(name).slice(0, 120) }).toString();
++  return url.href;
++}
++
++root.LabelTransfer = { createLabelGridUrl };
++})(window);
