@@ -2,9 +2,9 @@ import { readImageFragment, readGridFragment, unpackQrGrid } from './image-trans
 import { geometry, renderLabel, validateDesign, HEADS } from './label.js';
 const $ = id => document.getElementById(id);
 const storageKey = `little-label-studio:${location.pathname.replace(/index\.html$/, '')}`;
-const defaults = { mode: 'qr', qr: 'https://example.com', layout: 'side', title: 'A place for everything', subtitle: 'And everything in its place.\nEST. 2026', fontSize: 3, margin: 1, border: false, rotation: 0, threshold: 160, offset: 0, width: 50, height: 30, art: null, imageScaling: 'crisp' };
-const fields = { imageScaling: 'image-scaling', qr: 'qr', layout: 'layout', title: 'title', subtitle: 'subtitle', fontSize: 'font-size', margin: 'margin', border: 'border', rotation: 'rotation', threshold: 'threshold', offset: 'offset', width: 'width', height: 'height' };
-const numeric = new Set(['fontSize','margin','rotation','threshold','offset','width','height']);
+const defaults = { mode: 'qr', qr: 'https://example.com', layout: 'side', title: 'A place for everything', subtitle: 'And everything in its place.\nEST. 2026', fontSize: 3, margin: 1, border: false, rotation: 0, threshold: 160, offset: 0, width: 50, height: 30, art: null, imageScaling: 'crisp', modelCalibration: false, offsetX: 0, borderInset: .5 };
+const fields = { offsetX: 'offset-x', borderInset: 'border-inset', modelCalibration: 'model-calibration', imageScaling: 'image-scaling', qr: 'qr', layout: 'layout', title: 'title', subtitle: 'subtitle', fontSize: 'font-size', margin: 'margin', border: 'border', rotation: 'rotation', threshold: 'threshold', offset: 'offset', width: 'width', height: 'height' };
+const numeric = new Set(['offsetX','borderInset','fontSize','margin','rotation','threshold','offset','width','height']);
 let registry, design = { ...defaults }, artwork = null, connected = false, busy = false, valid = false, currentGeo, head = null, tag = null, memory;
 function message(text, error = false) { $('message').textContent = text; $('message').classList.toggle('error', error); }
 function syncControls() {
@@ -33,7 +33,7 @@ function updatePreset() {
 }
 function updateUI() {
   for (const [key, id] of Object.entries(fields)) {
-    if (key === 'border') $(id).checked = design[key]; else $(id).value = design[key] ?? defaults[key];
+    if (['border', 'modelCalibration'].includes(key)) $(id).checked = design[key]; else $(id).value = design[key] ?? (key === 'borderInset' ? design.margin / 2 : defaults[key]);
   }
   for (const tab of document.querySelectorAll('[data-mode]')) {
     const active = tab.dataset.mode === design.mode; tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
@@ -82,7 +82,9 @@ function render() {
     renderPreview();
     $('geometry-info').textContent = `${currentGeo.w_px} × ${currentGeo.h_px} px · ${currentGeo.dpi} dpi${result.qrInfo ? ` · QR dot ${result.qrInfo.moduleMm.toFixed(2)} mm` : ''}`;
     const clipped = design.width - currentGeo.printable_mm;
-    $('size-note').textContent = `${currentGeo.calibrated ? 'Calibrated size for this model.' : 'Custom geometry; check the first label on paper.'}${clipped > .2 ? ` Printable width is ${currentGeo.printable_mm.toFixed(1)} mm; the shaded edges will stay blank.` : ''} Feed correction: ${result.offset} px.`;
+    $('size-note').textContent = `${currentGeo.calibrated ? 'Calibrated size for this model.' : 'Custom geometry; check the first label on paper.'}${clipped > .2 ? ` Printable width is ${currentGeo.printable_mm.toFixed(1)} mm; the shaded edges will stay blank.` : ''} Feed correction: ${result.offset} px. Across-head correction: ${result.offsetX} px.${result.borderClipped ? ' Border reaches beyond the printable bitmap; increase Border inset or reduce the shift.' : ''}`;
+    $('paper-summary').textContent = `${design.width} × ${design.height} mm · density ${$('density').value}`;
+    $('model-feed-preset').textContent = `Use model feed preset (${currentGeo.offset_y_px} px)`;
     $('render-error').hidden = true; valid = true;
   } catch (e) {
     // Clear the previous bitmap so invalid edits cannot look printable.
@@ -128,7 +130,7 @@ async function readRoll(restore = false) {
 async function connectPrinter() {
   message('Choose your printer in the Bluetooth dialog…');
   try {
-    const info = await Niimbot.identify({ ...registry.models[$('model').value], name_prefixes: [] });
+    const info = await Niimbot.identify(registry.models[$('model').value]);
     const match = Object.entries(registry.models).find(([, model]) => model.id === info?.modelId);
     if (!match) { await Niimbot.disconnect(); throw new Error(`Printer model ${info?.modelId ?? 'unknown'} is not in this driver’s tested registry. Printing is disabled.`); }
     $('model').value = match[0]; $('density').value = match[1].density || 3;
@@ -183,7 +185,13 @@ async function init() {
   if (!window.isSecureContext || !Niimbot.isSupported()) { $('compatibility').hidden = false; $('compatibility').textContent = 'Bluetooth printing needs Chrome or Edge on desktop, over HTTPS or localhost. You can still design and export labels here.'; }
   try { const draft = JSON.parse(localStorage.getItem(`${storageKey}:draft`)); if (draft) { const loaded = validateDesign(draft); const image = loaded.art ? await loadImage(loaded.art) : null; design = loaded; artwork = image; } } catch { /* An invalid draft does not prevent startup. */ }
   for (const [key, id] of Object.entries(fields)) $(id).addEventListener('input', () => {
-    design[key] = key === 'border' ? $(id).checked : numeric.has(key) ? Number($(id).value) : $(id).value;
+    design[key] = ['border', 'modelCalibration'].includes(key) ? $(id).checked : numeric.has(key) ? Number($(id).value) : $(id).value;
+    if (key === 'rotation') {
+      $('preview-view').value = 'used';
+      if ([90, 270].includes(design.rotation) && design.layout === 'side') {
+        design.layout = 'stack'; $('layout').value = 'stack';
+      }
+    }
     if (key === 'layout') $('text-fields').hidden = ['qr', 'custom'].includes(design.mode) && design.layout === 'only';
     $('threshold-value').textContent = design.threshold; updatePreset(); render(); persist();
   });
@@ -203,9 +211,17 @@ async function init() {
     if (file.size > 16000) throw new Error('Grid JSON is too large.');
     const grid = JSON.parse(await file.text()); acceptGrid({ grid, name: file.name.slice(0, 120) });
   }));
+  for (const button of document.querySelectorAll('[data-nudge]')) button.addEventListener('click', () => {
+    const [dx, dy] = { left: [-.1, 0], right: [.1, 0], up: [0, -.1], down: [0, .1] }[button.dataset.nudge];
+    const x = Math.round(((design.offsetX || 0) + dx) * 10) / 10;
+    const y = Math.round((design.offset + dy) * 10) / 10;
+    if (Math.abs(x) > 5 || Math.abs(y) > 5) { message('Position adjustments are limited to ±5 mm.', true); return; }
+    design.offsetX = x; design.offset = y; $('preview-view').value = 'printer'; updateUI(); persist();
+  });
   $('compact-qr').addEventListener('click', () => { design.margin = .5; updateUI(); persist(); });
   $('preview-view').addEventListener('change', renderPreview);
   $('preset').addEventListener('change', () => { if ($('preset').value === 'custom') { $('width').focus(); return; } [design.width, design.height] = $('preset').value.split(',').map(Number); updateUI(); persist(); });
+  $('density').addEventListener('input', render);
   $('model').addEventListener('change', () => { head = null; $('density').value = registry.models[$('model').value].density; render(); });
   $('connect').addEventListener('click', () => operation(connectPrinter));
   $('disconnect').addEventListener('click', () => operation(async () => { await Niimbot.disconnect(); connected = false; tag = null; head = null; $('roll-info').textContent = 'Connect to read the roll’s RFID tag.'; message('Disconnected. Your design is still here.'); render(); }));

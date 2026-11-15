@@ -85,17 +85,18 @@ test('QR layouts devote more space to the code while remaining scannable with co
     assert.equal(decode(bitmap(d).canvas),d.qr,`${layout}/${rotation}/compact`);
   }
 });
-test('thin border stays centered and entirely visible with compact margins and feed corrections',()=>{
+test('thin border moves with feed correction and reports clipping at the bitmap edges',()=>{
   const blank=createCanvas(1,1);
   for(const model of ['b1','b1pro']) for(const rotation of [0,90,180,270]) for(const offset of [-5,0,5]) {
     const geo=geometry(registry,model,50,30),canvas=makeCanvas();
-    renderLabel(canvas,{...spec,mode:'image',title:'',subtitle:'',margin:.5,border:true,rotation,offset},geo,qrScope.qrcode,blank,makeCanvas);
+    const info=renderLabel(canvas,{...spec,mode:'image',title:'',subtitle:'',margin:.5,border:true,rotation,offset},geo,qrScope.qrcode,blank,makeCanvas);
     const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
     const inset=Math.max(1,Math.round(Math.round(.5*geo.dpi/25.4)/2));
     const thickness=Math.max(1,Math.round(geo.dpi/25.4*.2));
     for(let y=0;y<canvas.height;y++) for(let x=0;x<canvas.width;x++) {
-      const inside=x>=inset && x<canvas.width-inset && y>=inset && y<canvas.height-inset;
-      const edge=x<inset+thickness || x>=canvas.width-inset-thickness || y<inset+thickness || y>=canvas.height-inset-thickness;
+      const sourceY=y-info.offset;
+      const inside=x>=inset && x<canvas.width-inset && sourceY>=inset && sourceY<canvas.height-inset;
+      const edge=x<inset+thickness || x>=canvas.width-inset-thickness || sourceY<inset+thickness || sourceY>=canvas.height-inset-thickness;
       assert.equal(data[(y*canvas.width+x)*4],inside&&edge?0:255,`${model}/${rotation}/${offset} at ${x},${y}`);
     }
   }
@@ -124,4 +125,67 @@ test('custom QR draws the exact supplied modules without calling the QR generato
     assert.equal(decode(actual),spec.qr);
     assert.equal(validateDesign({version:1,design:{...d,mode:'custom',grid}}).grid.data,grid.data);
   }
+});
+test('stacked captions are centered below the actual QR or artwork within the bottom margin',()=>{
+  const art=createCanvas(80,80);art.getContext('2d').fillRect(0,0,80,80);
+  for(const mode of ['qr','custom','image']) for(const rotation of [0,90,270]) {
+    const calls=[],rects=[],images=[];
+    const factory=()=>{
+      const canvas=makeCanvas(),ctx=canvas.getContext('2d');
+      const text=ctx.fillText.bind(ctx),rect=ctx.fillRect.bind(ctx),draw=ctx.drawImage.bind(ctx);
+      ctx.fillText=(value,x,y,...rest)=>{calls.push({value,x,y});return text(value,x,y,...rest);};
+      ctx.fillRect=(x,y,w,h)=>{if(['#000','#000000'].includes(ctx.fillStyle))rects.push({x,y,w,h});return rect(x,y,w,h);};
+      ctx.drawImage=(img,x,y,w,h)=>{images.push({x,y,w,h});return draw(img,x,y,w,h);};
+      return canvas;
+    };
+    const modules=Array.from({length:21},()=>Array(21).fill(true));
+    const d={...spec,mode,grid:packQrGrid(modules),rotation,layout:'stack',title:'TITLE',subtitle:'Details'};
+    const geo=geometry(registry,'b1',50,30),out=makeCanvas();
+    const result=renderLabel(out,d,geo,qrScope.qrcode,art,factory);
+    assert.equal(calls[0].value,'TITLE');
+    const bottom=mode==='image'?images[0].y+images[0].h:Math.max(...rects.map(r=>r.y+r.h));
+    const distance=calls[0].y-bottom;
+    assert.ok(distance>0,`${mode}/${rotation} caption below image`);
+    const px=geo.dpi/25.4,margin=Math.round(d.margin*px),gap=Math.round(1.5*px);
+    const imageBottom=bottom+(mode==='image'?0:result.qrInfo.modulePx);
+    const workHeight=[90,270].includes(rotation)?geo.w_px:geo.h_px;
+    const expectedCenter=(imageBottom+gap+workHeight-margin)/2;
+    const actualCenter=(calls[0].y+calls.at(-1).y)/2;
+    assert.ok(Math.abs(actualCenter-expectedCenter)<.01,`${mode}/${rotation} caption center ${actualCenter}, expected ${expectedCenter}`);
+  }
+});
+test('ordinary QR exports from local and GitHub stay centered with zero feed offset',()=>{
+  for(const name of ['local','github']) {
+    const d=JSON.parse(readFileSync(new URL(`./fixtures/alignment-${name}.json`,import.meta.url))).design;
+    for(const rotation of [0,90,180,270]) for(const modelCalibration of [false,true]) {
+      const {canvas,geo,result}=bitmap({...d,rotation,modelCalibration});
+      const used=createCanvas(rotation%180?canvas.height:canvas.width,rotation%180?canvas.width:canvas.height),ctx=used.getContext('2d');
+      ctx.translate(used.width/2,used.height/2);ctx.rotate(-rotation*Math.PI/180);ctx.drawImage(canvas,-canvas.width/2,-canvas.height/2);
+      const rgba=ctx.getImageData(0,0,used.width,used.height),decoded=jsQR(new Uint8ClampedArray(rgba.data),used.width,used.height);
+      assert.equal(decoded.data,d.qr);
+      const loc=decoded.location,center=(loc.topLeftCorner.x+loc.topRightCorner.x+loc.bottomLeftCorner.x+loc.bottomRightCorner.x)/4;
+      const shift=modelCalibration?(rotation===90?4:rotation===270?-4:0):0;
+      assert.ok(Math.abs(center-used.width/2-shift)<=.51,`${name}/${rotation}/${modelCalibration}: ${center}`);
+      assert.equal(result.offset,modelCalibration?geo.offset_y_px:0);
+      // Border is centered across the head in the actual printer bitmap.
+      const row=canvas.getContext('2d').getImageData(0,Math.floor(canvas.height/2),canvas.width,1).data;
+      const black=[];for(let x=0;x<canvas.width;x++)if(row[x*4]===0)black.push(x);
+      assert.equal((black[0]+black.at(-1)+1)/2,canvas.width/2);
+    }
+  }
+});
+test('registration moves the full border and QR together without resizing modules',()=>{
+  const d={...spec,layout:'stack',rotation:90,border:true,borderInset:2};
+  const base=bitmap(d),shifted=bitmap({...d,offsetX:-.3,offset:.4});
+  assert.equal(shifted.result.qrInfo.modulePx,base.result.qrInfo.modulePx);
+  assert.equal(shifted.result.offsetX,-2);assert.equal(shifted.result.offset,3);
+  assert.equal(shifted.result.borderClipped,false);
+  const a=base.canvas.getContext('2d').getImageData(0,0,base.canvas.width,base.canvas.height).data;
+  const b=shifted.canvas.getContext('2d').getImageData(0,0,shifted.canvas.width,shifted.canvas.height).data;
+  for(let y=0;y<base.canvas.height;y++)for(let x=0;x<base.canvas.width;x++) {
+    const sx=x+2,sy=y-3;
+    const expected=sx>=0&&sx<base.canvas.width&&sy>=0&&sy<base.canvas.height?a[(sy*base.canvas.width+sx)*4]:255;
+    assert.equal(b[(y*base.canvas.width+x)*4],expected);
+  }
+  assert.equal(bitmap({...d,borderInset:.1,offsetX:1}).result.borderClipped,true);
 });

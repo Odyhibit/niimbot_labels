@@ -17,7 +17,7 @@ export function geometry(registry, key, width, height, head) {
   return { w_px, h_px, offset_y_px: calibrated?.offset_y_px || 0, dpi: model.dpi,
     w_mm: width, h_mm: height, printable_mm: w_px * 25.4 / model.dpi, calibrated: !!calibrated };
 }
-function textBlock(ctx, lines, box, fontPx) {
+function textBlock(ctx, lines, box, fontPx, align = 'center') {
   if (!lines.length) return;
   let size = fontPx;
   for (; size >= 5; size -= .5) {
@@ -25,7 +25,7 @@ function textBlock(ctx, lines, box, fontPx) {
     if (widest <= box.w && lines.length * size * 1.2 <= box.h) break;
   }
   if (size < 5) throw new Error('Text does not fit. Shorten the text, reduce margins, or use a larger label.');
-  let y = box.y + (box.h - lines.length * size * 1.2) / 2;
+  let y = box.y + (align === 'top' ? 0 : (box.h - lines.length * size * 1.2) / 2);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   lines.forEach((line, i) => { ctx.font = `${i === 0 ? 700 : 400} ${size * (i === 0 ? 1 : .75)}px sans-serif`; ctx.fillText(line, box.x + box.w / 2, y + size * .6); y += size * 1.2; });
 }
@@ -69,7 +69,13 @@ export function renderLabel(canvas, spec, geo, qrFactory, artwork, createCanvas 
     const total = (count + 2 * quiet) * scale, x = Math.round(qrBox.x + (qrBox.w - total) / 2), y = Math.round(qrBox.y + (qrBox.h - total) / 2);
     for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect(x + (c + quiet) * scale, y + (r + quiet) * scale, scale, scale);
     qrInfo = { modulePx: scale, moduleMm: scale / px, modules: count };
-    if (hasText) textBlock(ctx, lines, side ? { x: box.x + qrBox.w + gap, y: box.y, w: box.w - qrBox.w - gap, h: box.h } : { x: box.x, y: box.y + qrBox.h + gap, w: box.w, h: box.h - qrBox.h - gap }, spec.fontSize * px);
+    if (hasText) {
+      const captionY = y + total + gap;
+      textBlock(ctx, lines, side
+        ? { x: box.x + qrBox.w + gap, y: box.y, w: box.w - qrBox.w - gap, h: box.h }
+        : { x: box.x, y: captionY, w: box.w, h: box.y + box.h - captionY },
+      spec.fontSize * px);
+    }
   } else if (spec.mode === 'text') {
     if (!lines.length) throw new Error('Add a heading or details to print a text label.');
     textBlock(ctx, lines, box, spec.fontSize * px);
@@ -85,17 +91,20 @@ export function renderLabel(canvas, spec, geo, qrFactory, artwork, createCanvas 
     const height = crisp ? Math.max(1, Math.round(artwork.height * factor)) : artwork.height * factor;
     const x = box.x + (box.w - width) / 2, y = box.y + (available - height) / 2;
     ctx.drawImage(artwork, crisp ? Math.round(x) : x, crisp ? Math.round(y) : y, width, height);
-    if (captionH) textBlock(ctx, lines, { x: box.x, y: box.y + available + gap, w: box.w, h: captionH }, spec.fontSize * px);
+    if (captionH) {
+      const captionY = (crisp ? Math.round(y) : y) + height + gap;
+      textBlock(ctx, lines, { x: box.x, y: captionY, w: box.w, h: box.y + box.h - captionY }, spec.fontSize * px);
+    }
   }
   const out = canvas.getContext('2d'); out.fillStyle = '#fff'; out.fillRect(0, 0, canvas.width, canvas.height);
-  const offset = geo.offset_y_px + Math.round(spec.offset * px);
-  out.save(); out.translate(canvas.width / 2, canvas.height / 2 + offset); out.rotate(spec.rotation * Math.PI / 180); out.drawImage(work, -work.width / 2, -work.height / 2); out.restore();
-  // The border frames the page, rather than moving with the artwork's feed
-  // correction. Draw inside the final bitmap so compact margins and rotation
-  // cannot shift a line beyond its edges. Integer rectangles keep it crisp.
+  const offset = (spec.modelCalibration ? geo.offset_y_px : 0) + Math.round(spec.offset * px);
+  out.save(); out.translate(canvas.width / 2, canvas.height / 2); out.rotate(spec.rotation * Math.PI / 180); out.drawImage(work, -work.width / 2, -work.height / 2); out.restore();
+  // Construct the complete page before applying printer registration. Border,
+  // QR, and caption must move together; translation does not stretch modules.
   if (spec.border) {
-    const inset = Math.max(1, Math.round(m / 2));
+    const inset = Math.max(1, Math.round((spec.borderInset ?? spec.margin / 2) * px));
     const thickness = Math.max(1, Math.round(px * .2));
+    if (2 * inset + thickness >= Math.min(canvas.width, canvas.height)) throw new Error('Border inset leaves too little room. Reduce the border inset.');
     const width = canvas.width - 2 * inset, height = canvas.height - 2 * inset;
     out.fillStyle = '#000';
     out.fillRect(inset, inset, width, thickness);
@@ -103,6 +112,15 @@ export function renderLabel(canvas, spec, geo, qrFactory, artwork, createCanvas 
     out.fillRect(inset, inset, thickness, height);
     out.fillRect(canvas.width - inset - thickness, inset, thickness, height);
   }
+  const offsetX = Math.round((spec.offsetX ?? 0) * px);
+  if (offsetX || offset) {
+    const page = createCanvas(); page.width = canvas.width; page.height = canvas.height;
+    page.getContext('2d').drawImage(canvas, 0, 0);
+    out.fillStyle = '#fff'; out.fillRect(0, 0, canvas.width, canvas.height);
+    out.drawImage(page, offsetX, offset);
+  }
+  const borderInset = Math.max(1, Math.round((spec.borderInset ?? spec.margin / 2) * px));
+  const borderClipped = Boolean(spec.border && (Math.abs(offsetX) > borderInset || Math.abs(offset) > borderInset));
   const pixels = out.getImageData(0, 0, canvas.width, canvas.height);
   for (let i = 0; i < pixels.data.length; i += 4) {
     const lum = .299 * pixels.data[i] + .587 * pixels.data[i + 1] + .114 * pixels.data[i + 2];
@@ -110,7 +128,7 @@ export function renderLabel(canvas, spec, geo, qrFactory, artwork, createCanvas 
     pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = v; pixels.data[i + 3] = 255;
   }
   out.putImageData(pixels, 0, 0);
-  return { qrInfo, offset };
+  return { qrInfo, offset, offsetX, borderClipped };
 }
 export function validateDesign(value) {
   if (!value || value.version !== 1 || !value.design || typeof value.design !== 'object') throw new Error('Choose a Little Label Studio design JSON file.');
@@ -121,6 +139,8 @@ export function validateDesign(value) {
   if (![0, 90, 180, 270].includes(d.rotation) || typeof d.border !== 'boolean') throw new Error('Invalid design settings.');
   if (d.grid != null) unpackQrGrid(d.grid);
   if (d.customName != null && (typeof d.customName !== 'string' || d.customName.length > 120)) throw new Error('Invalid custom QR name.');
+  for (const [key, min, max] of [['offsetX', -5, 5], ['borderInset', .1, 10]]) if (d[key] != null && (!Number.isFinite(d[key]) || d[key] < min || d[key] > max)) throw new Error(`Invalid ${key} in design.`);
+  if (d.modelCalibration != null && typeof d.modelCalibration !== 'boolean') throw new Error('Invalid model calibration setting.');
   if (d.imageScaling != null && !['crisp', 'smooth'].includes(d.imageScaling)) throw new Error('Invalid image scaling.');
   if (d.art && (typeof d.art !== 'string' || d.art.length > 8_000_000 || !/^data:image\/(png|jpeg|webp);base64,/.test(d.art))) throw new Error('Invalid artwork in design.');
   return { ...d };

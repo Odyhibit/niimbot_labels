@@ -12,7 +12,7 @@ const pause = () => new Promise(resolve => setTimeout(resolve,10));
 async function ready(predicate) { for(let i=0;i<100;i++) { if(predicate()) return; await pause(); } throw new Error('UI did not settle.'); }
 async function harness(hash = '') {
   const dom = new JSDOM(read('index.html'),{url:'http://localhost:8080/labels/'+hash,runScripts:'outside-only'});
-  const w=dom.window, calls=[];
+  const w=dom.window, calls=[],identifiedModels=[];
   Object.defineProperty(w,'isSecureContext',{value:true});
   w.fetch=async()=>({ok:true,json:async()=>registry});w.Image=Image;
   const surfaces=new WeakMap();
@@ -29,17 +29,18 @@ async function harness(hash = '') {
   w.HTMLCanvasElement.prototype.toDataURL=function(){return surface(this).toDataURL('image/png');};
   w.HTMLCanvasElement.prototype.toBlob=function(cb){cb(new w.Blob([surface(this).toBuffer('image/png')]));};
   let barcode='6970000000001', failure=false;
-  w.Niimbot={VERSION:'test',isSupported:()=>true,identify:async()=>({modelId:4096}),probe:async()=>({cmd:0xde,data:[0,0,0,0,1,128]}),disconnect:async()=>{},getStatus:async()=>({decoded:{rfid:{tagPresent:true,barCode:barcode,usedPaper:5,capacity:100}},confidence:'inferred'}),printImage:async(url,opts)=>{calls.push({url,opts});if(failure)throw new Error('Page not confirmed');opts.onProgress('ok');}};
+  w.Niimbot={VERSION:'test',isSupported:()=>true,identify:async(model)=>{identifiedModels.push(model);return {modelId:4096};},probe:async()=>({cmd:0xde,data:[0,0,0,0,1,128]}),disconnect:async()=>{},getStatus:async()=>({decoded:{rfid:{tagPresent:true,barCode:barcode,usedPaper:5,capacity:100}},confidence:'inferred'}),printImage:async(url,opts)=>{calls.push({url,opts});if(failure)throw new Error('Page not confirmed');opts.onProgress('ok');}};
   w.eval(read('vendor/niimbot/label-memory.js'));w.eval(read('vendor/qrcode/qrcode.js'));w.eval(read('vendor/qrcode/qrcode_UTF8.js'));
   w.eval(read('image-transfer.js').replaceAll('export ','')+'\n'+read('label.js').replaceAll('export ','').replace(/^import[^\n]+\n/gm,'')+'\n'+read('app.js').replace(/^import[^\n]+\n/gm,''));
   await ready(()=>w.document.getElementById('model').options.length>0);
   const el=id=>w.document.getElementById(id);
   const change=(id,value)=>{el(id).value=value;el(id).dispatchEvent(new w.Event('input',{bubbles:true}));};
-  return {dom,w,calls,el,change,setBarcode:v=>barcode=v,setFailure:v=>failure=v};
+  return {dom,w,calls,identifiedModels,el,change,setBarcode:v=>barcode=v,setFailure:v=>failure=v};
 }
 test('pair, restore roll size, and print the exact preview bitmap',async()=>{
   const h=await harness();try {
     h.el('connect').click();await ready(()=>!h.el('read-roll').disabled);
+    assert.deepEqual(Array.from(h.identifiedModels[0].name_prefixes),['B1']);
     assert.equal(h.el('model').value,'b1');assert.match(h.el('roll-info').textContent,/6970000000001/);
     h.change('width','40');h.change('height','60');h.el('remember-roll').click();
     h.change('width','50');h.change('height','30');h.el('read-roll').click();
@@ -77,12 +78,12 @@ test('an unavailable RFID response does not block printing or save a stale roll'
 test('design import applies size, text, and raster artwork together',async()=>{
   const h=await harness();try {
     const img=createCanvas(100,50);img.getContext('2d').fillRect(10,10,80,30);
-    const design={mode:'image',qr:'https://example.com',layout:'only',title:'TEST ART',subtitle:'',fontSize:3,margin:2,border:true,rotation:0,threshold:160,offset:0,width:40,height:30,art:img.toDataURL('image/png')};
+    const design={mode:'image',qr:'https://example.com',layout:'only',title:'TEST ART',subtitle:'',fontSize:3,margin:.5,border:true,rotation:0,threshold:160,offset:0,width:40,height:30,art:img.toDataURL('image/png')};
     Object.defineProperty(h.el('design-file'),'files',{value:[{size:1024,text:async()=>JSON.stringify({version:1,design})}],configurable:true});
     h.el('design-file').dispatchEvent(new h.w.Event('change'));
     await ready(()=>/Design imported/.test(h.el('message').textContent));
     assert.equal(h.el('width').value,'40');assert.equal(h.el('title').value,'TEST ART');assert.equal(h.el('border').checked,true);
-    assert.equal(h.el('tab-image').getAttribute('aria-selected'),'true');assert.equal(h.el('render-error').hidden,true);assert.equal(h.el('download').disabled,false);
+    assert.equal(h.el('tab-image').getAttribute('aria-selected'),'true');assert.equal(h.el('border-inset').value,'0.25');assert.equal(h.el('render-error').hidden,true);assert.equal(h.el('download').disabled,false);
   } finally {h.dom.window.close();}
 });
 test('portrait use previews upright while printing rotated text on the original roll',async()=>{
@@ -110,7 +111,7 @@ test('portrait use previews upright while printing rotated text on the original 
 });
 test('compact QR margins enlarge an existing design without changing its orientation or roll',async()=>{
   const h=await harness();try {
-    h.change('rotation','90');h.change('margin','2');
+    h.change('rotation','90');h.change('layout','side');h.change('margin','2');
     h.el('compact-qr').click();
     assert.equal(h.el('margin').value,'0.5');assert.equal(h.el('rotation').value,'90');
     assert.equal(h.el('width').value,'50');assert.equal(h.el('height').value,'30');
@@ -145,5 +146,44 @@ test('custom grid transfer selects a dedicated mode and keeps the grid intact th
     h.el('connect').click();await ready(()=>!h.el('print').disabled);
     h.el('print').click();await ready(()=>h.calls.length===1&&!h.el('print').disabled);
     assert.equal(h.calls[0].url,h.el('preview').toDataURL());
+  } finally {h.dom.window.close();}
+});
+test('rotating a QR label defaults to above/below in the upright view and allows an explicit side layout',async()=>{
+  const h=await harness();try {
+    h.el('preview-view').value='printer';h.el('preview-view').dispatchEvent(new h.w.Event('change'));
+    h.change('layout','side');h.change('rotation','90');
+    assert.equal(h.el('layout').value,'stack');assert.equal(h.el('preview-view').value,'used');
+    assert.equal(h.el('render-error').hidden,true);
+    h.change('layout','side');assert.equal(h.el('layout').value,'side');
+    h.change('layout','only');h.change('rotation','270');assert.equal(h.el('layout').value,'only');
+  } finally {h.dom.window.close();}
+});
+test('zero feed offset has no hidden model correction unless explicitly enabled',async()=>{
+  const h=await harness();try {
+    h.change('rotation','90');h.change('offset','0');
+    assert.equal(h.el('model-calibration').checked,false);assert.match(h.el('size-note').textContent,/Feed correction: 0 px/);
+    h.el('model-calibration').checked=true;h.el('model-calibration').dispatchEvent(new h.w.Event('input'));
+    assert.match(h.el('size-note').textContent,/Feed correction: 4 px/);
+    h.el('model-calibration').checked=false;h.el('model-calibration').dispatchEvent(new h.w.Event('input'));
+    assert.match(h.el('size-note').textContent,/Feed correction: 0 px/);
+  } finally {h.dom.window.close();}
+});
+test('all nudge buttons use as-printed directions at every artwork rotation',async()=>{
+  const h=await harness();try {
+    for (const rotation of ['0','90','180','270']) {
+      h.change('rotation',rotation);
+      h.change('offset-x','0');h.change('offset','0');
+      h.w.document.querySelector('[data-nudge="down"]').click();
+      assert.equal(h.el('offset-x').value,'0');assert.equal(h.el('offset').value,'0.1');
+      h.w.document.querySelector('[data-nudge="left"]').click();
+      assert.equal(h.el('offset-x').value,'-0.1');assert.equal(h.el('offset').value,'0.1');
+      assert.equal(h.el('preview-view').value,'printer');
+      const saved=JSON.parse(h.w.localStorage.getItem('little-label-studio:/labels/:draft')).design;
+      assert.equal(saved.offsetX,-.1);assert.equal(saved.offset,.1);
+      h.w.document.querySelector('[data-nudge="up"]').click();
+      h.w.document.querySelector('[data-nudge="right"]').click();
+      assert.equal(h.el('offset-x').value,'0');assert.equal(h.el('offset').value,'0');
+      assert.equal(h.el('render-error').hidden,true);
+    }
   } finally {h.dom.window.close();}
 });

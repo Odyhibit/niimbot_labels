@@ -2,3 +2,7 @@
 
 .preview-view{display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid var(--line)}.preview-view label{white-space:nowrap;margin:0!important}.preview-view select{font-size:11px;min-height:36px;padding:8px}.options{margin:20px 0}#orientation-note{margin-bottom:0}
 @media(max-width:440px){.tabs{display:grid;grid-template-columns:1fr 1fr}}#panel-custom label{margin-top:16px}#panel-custom .art-actions{margin:12px 0}#qr-layout-controls{margin-top:16px}
+
+.nudge-controls{display:flex;flex-wrap:wrap;gap:6px}.nudge-controls button{font-size:11px;padding:8px 10px}details label:not(.check){margin-top:12px!important}
+
+.printer-controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px}.model-control{flex:1 1 220px}.printer-controls .connection{flex:0 1 auto;flex-wrap:wrap;gap:8px;min-height:41px}.printer-controls .connection .pill{display:inline-flex}.paper-settings{margin:18px 0 12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.paper-settings>summary{padding:14px 0;color:var(--green);font-size:12px;font-weight:600}.paper-settings-body{padding:0 0 14px}.paper-settings-body>.two-col{margin-bottom:16px}.paper-settings-body input:not([type=checkbox]){max-width:none}.paper-settings-body label:not(.check){margin-top:0!important}.paper-settings-body details label:not(.check){margin-top:12px!important}.setup-body .print-row{border-top:0;padding-top:4px}
