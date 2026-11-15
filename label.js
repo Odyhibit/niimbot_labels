@@ -63,10 +63,11 @@ export function renderLabel(canvas, spec, geo, qrFactory, artwork, createCanvas 
         qrBox.h = Math.min(qrBox.h, box.h - gap - lines.length * 6);
       }
     }
-    const count = qr.getModuleCount(), scale = Math.floor(Math.min(qrBox.w, qrBox.h) / (count + 8));
+    const quiet = 1; // Compact printed quiet zone; surrounding stock supplies extra clearance.
+    const count = qr.getModuleCount(), scale = Math.floor(Math.min(qrBox.w, qrBox.h) / (count + 2 * quiet));
     if (scale < 2) throw new Error('QR is too dense for this space. Shorten its content, use QR only, or choose a larger label.');
-    const total = (count + 8) * scale, x = Math.round(qrBox.x + (qrBox.w - total) / 2), y = Math.round(qrBox.y + (qrBox.h - total) / 2);
-    for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect(x + (c + 4) * scale, y + (r + 4) * scale, scale, scale);
+    const total = (count + 2 * quiet) * scale, x = Math.round(qrBox.x + (qrBox.w - total) / 2), y = Math.round(qrBox.y + (qrBox.h - total) / 2);
+    for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect(x + (c + quiet) * scale, y + (r + quiet) * scale, scale, scale);
     qrInfo = { modulePx: scale, moduleMm: scale / px, modules: count };
     if (hasText) textBlock(ctx, lines, side ? { x: box.x + qrBox.w + gap, y: box.y, w: box.w - qrBox.w - gap, h: box.h } : { x: box.x, y: box.y + qrBox.h + gap, w: box.w, h: box.h - qrBox.h - gap }, spec.fontSize * px);
   } else if (spec.mode === 'text') {
