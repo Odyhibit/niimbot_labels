@@ -1,5 +1,7 @@
 # Little Label Studio
 
+## Try it here https://odyhibit.github.io/niimbot_labels/
+
 A static, browser-only editor for QR, text, and simple artwork labels, printing directly to a Niimbot Bluetooth printer using [iscarelli/niimbot-web-bluetooth](https://github.com/iscarelli/niimbot-web-bluetooth).
 
 No backend, accounts, API keys, CDN dependencies, or USB connection. The driver, QR generator, and model registry are committed under `vendor/`. Labels and drafts are processed locally. Drafts and roll mappings stay in browser storage; export a design JSON to move it to another browser. Uploaded SVG files are rasterized as images, never inserted into the page.
